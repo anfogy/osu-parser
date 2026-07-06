@@ -170,15 +170,15 @@ class DotNetTick(datetime):
 
 
 class ButtonState:
-    __buttons = ()
+    _buttons = ()
 
     def __init__(self, raw_states: int):
-        for i, name in enumerate(self.__buttons):
+        for i, name in enumerate(self._buttons):
             setattr(self, name, bool(raw_states & (2 << i)))
 
     def __mask(self) -> int:
         value = 0
-        for i, name in enumerate(self.__buttons):
+        for i, name in enumerate(self._buttons):
             if getattr(self, name):
                 value |= 2 << i
         return value
@@ -188,8 +188,8 @@ class ButtonState:
 
 
 class StandardButtonState(ButtonState):
-    __buttons = ("M1", "M2", "K1", "K2", "Smoke")
-    __slots__ = __buttons
+    _buttons = ("M1", "M2", "K1", "K2", "Smoke")
+    __slots__ = _buttons
 
     M1: bool
     M2: bool
@@ -199,11 +199,11 @@ class StandardButtonState(ButtonState):
 
 
 class ManiaButtonState(ButtonState):
-    __buttons = (
+    _buttons = (
         "K1", "K2", "K3", "K4", "K5", "K6", "K7", "K8", "K9",
         "K10", "K11", "K12", "K13", "K14", "K15", "K16", "K17", "K18"
     )
-    __slots__ = __buttons
+    __slots__ = _buttons
 
     K1: bool
     K2: bool
@@ -226,8 +226,8 @@ class ManiaButtonState(ButtonState):
 
 
 class TaikoButtonState(ButtonState):
-    __buttons = ("left_don", "left_kat", "right_don", "right_kat")
-    __slots__ = __buttons
+    _buttons = ("left_don", "left_kat", "right_don", "right_kat")
+    __slots__ = _buttons
 
     left_don: bool
     left_kat: bool
@@ -236,8 +236,8 @@ class TaikoButtonState(ButtonState):
 
 
 class CTBButtonState(ButtonState):
-    __buttons = ("dash")
-    __slots__ = __buttons
+    _buttons = "dash"
+    __slots__ = _buttons
 
     dash: bool
 
