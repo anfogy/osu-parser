@@ -1,5 +1,5 @@
-from datetime import datetime, timedelta
-from dataclasses import dataclass
+from datetime import datetime, timedelta, timezone
+from dataclasses import dataclass, fields
 from enum import Enum
 import lzma
 import json
@@ -17,49 +17,37 @@ class BufferReader(bytearray):
         self.__pointer += len(chunk)
         return bytes(chunk)
 
-    def tell(self) -> int:
-        return self.__pointer
-
-    def insert_bytes_at(self, pos: int, data: bytes) -> None:
-        self[pos:pos] = data
-
-    def delete_bytes_at(self, pos: int, length: int) -> None:
-        del self[pos:pos + length]
-
-    def overwrite_bytes_at(self, pos: int, data: bytes) -> None:
-        self[pos:pos + len(data)] = data
-
 
 class ULEB128(object):
-    def __init__(self, value):
+    def __init__(self, value: int | bytes | bytearray):
         if isinstance(value, int):
             self.value = value
-            self.bytes = self.__encode_int(value)
+            self.bytes = self.__encode_int()
         elif isinstance(value, (bytes, bytearray)):
             self.bytes = bytes(value)
-            self.value = self.__decode_bytes(self.bytes)
+            self.value = self.__decode_bytes()
         else:
             raise TypeError("Value must be an int, bytes, or bytearray")
 
-    def __encode_int(self, number: int) -> bytes:
-        if number < 0:
+    def __encode_int(self) -> bytes:
+        if self.value < 0:
             raise ValueError("ULEB128 value cannot be negative")
 
         buffer = []
         while True:
-            byte = number & 0x7F
-            number >>= 7
-            if number != 0:
+            byte = self.value & 0x7F
+            self.value >>= 7
+            if self.value != 0:
                 byte |= 0x80
             buffer.append(byte)
-            if number == 0:
+            if self.value == 0:
                 break
         return bytes(buffer)
 
-    def __decode_bytes(self, byte_array: bytes) -> int:
+    def __decode_bytes(self) -> int:
         result = 0
         shift = 0
-        for byte in byte_array:
+        for byte in self.bytes:
             result |= (byte & 0x7F) << shift
             if not (byte & 0x80):
                 break
@@ -95,43 +83,47 @@ class HitData(object):
     iKatus: int  # Number of Katus in osu!, 200s in osu!mania
     iMisses: int
 
+    def __iter__(self):
+        return (getattr(self, field.name) for field in fields(self))
+
 
 class Mod(Enum):
-    NoFail = 1
-    Easy = 2
-    TouchDevice = 4
-    Hidden = 8
-    HardRock = 16
-    SuddenDeath = 32
-    DoubleTime = 64
-    Relax = 128
-    HalfTime = 256
-    Nightcore = 512
-    Flashlight = 1024
-    Autoplay = 2048
-    SpunOut = 4096
-    Autopilot = 8192
-    Perfect = 16384
-    Key4 = 32768
-    Key5 = 65536
-    Key6 = 131072
-    Key7 = 262144
-    Key8 = 524288
-    FadeIn = 1048576
-    Random = 2097152
-    Cinema = 4194304
-    TargetPractice = 8388608
-    Key9 = 16777216
-    KeyCoop = 33554432
-    Key1 = 67108864
-    Key3 = 134217728
-    Key2 = 268435456
-    ScoreV2 = 536870912
-    Mirror = 1073741824
+    NoFail = 2 << 0
+    Easy = 2 << 1
+    TouchDevice = 2 << 2
+    Hidden = 2 << 3
+    HardRock = 2 << 4
+    SuddenDeath = 2 << 5
+    DoubleTime = 2 << 6
+    Relax = 2 << 7
+    HalfTime = 2 << 8
+    Nightcore = 2 << 9
+    Flashlight = 2 << 10
+    Autoplay = 2 << 11
+    SpunOut = 2 << 12
+    Autopilot = 2 << 13
+    Perfect = 2 << 14
+    Key4 = 2 << 15
+    Key5 = 2 << 16
+    Key6 = 2 << 17
+    Key7 = 2 << 18
+    Key8 = 2 << 19
+    FadeIn = 2 << 20
+    Random = 2 << 21
+    Cinema = 2 << 22
+    TargetPractice = 2 << 23
+    Key9 = 2 << 24
+    KeyCoop = 2 << 25
+    Key1 = 2 << 26
+    Key3 = 2 << 27
+    Key2 = 2 << 28
+    ScoreV2 = 2 << 29
+    Mirror = 2 << 30
 
 
 class ModData(list):
     __slots__ = ("__raw",)
+    __raw: int
 
     def __init__(self, raw: int) -> None:
         self.__raw = raw
@@ -149,11 +141,11 @@ class ModData(list):
 
 
 class DotNetTick(datetime):
-    __slots__ = ("ticks",)
+    __slots__ = ("__ticks",)
+    __ticks: int
 
     def __new__(cls, ticks: int):
         dt = datetime(1, 1, 1) + timedelta(microseconds=ticks // 10)
-
         self = super().__new__(
             cls,
             dt.year,
@@ -162,45 +154,132 @@ class DotNetTick(datetime):
             dt.hour,
             dt.minute,
             dt.second,
-            dt.microsecond
+            dt.microsecond,
+            tzinfo=timezone.utc
         )
 
-        self.ticks = ticks
+        self.__ticks = ticks
         return self
 
+    @property
+    def ticks(self) -> int:
+        return 621355968000000000 + int(self.timestamp() * 10_000_000)
 
-@dataclass(slots=True, repr=False)
-class ButtonState(object):
+    def __str__(self) -> str:
+        return self.strftime("%m/%d/%Y %H:%M:%S %:z")
+
+
+class ButtonState:
+    __buttons = ()
+
+    def __init__(self, raw_states: int):
+        for i, name in enumerate(self.__buttons):
+            setattr(self, name, bool(raw_states & (2 << i)))
+
+    def __mask(self) -> int:
+        value = 0
+        for i, name in enumerate(self.__buttons):
+            if getattr(self, name):
+                value |= 2 << i
+        return value
+
+    def __repr__(self) -> str:
+        return f"{self.__mask()}"
+
+
+class StandardButtonState(ButtonState):
+    __buttons = ("M1", "M2", "K1", "K2", "Smoke")
+    __slots__ = __buttons
+
     M1: bool
     M2: bool
     K1: bool
     K2: bool
     Smoke: bool
 
-    __rawStates: int
 
-    def __init__(self, rawStates: int) -> None:
-        self.__rawStates = rawStates
+class ManiaButtonState(ButtonState):
+    __buttons = (
+        "K1", "K2", "K3", "K4", "K5", "K6", "K7", "K8", "K9",
+        "K10", "K11", "K12", "K13", "K14", "K15", "K16", "K17", "K18"
+    )
+    __slots__ = __buttons
 
-        self.M1 = bool(rawStates & 1)
-        self.M2 = bool(rawStates & 2)
-        self.K1 = bool(rawStates & 4)
-        self.K2 = bool(rawStates & 8)
-        self.Smoke = bool(rawStates & 16)
+    K1: bool
+    K2: bool
+    K3: bool
+    K4: bool
+    K5: bool
+    K6: bool
+    K7: bool
+    K8: bool
+    K9: bool
+    K10: bool
+    K11: bool
+    K12: bool
+    K13: bool
+    K14: bool
+    K15: bool
+    K16: bool
+    K17: bool
+    K18: bool
 
-    def __repr__(self):
-        return f"{self.__rawStates:05b}"
+
+class TaikoButtonState(ButtonState):
+    __buttons = ("left_don", "left_kat", "right_don", "right_kat")
+    __slots__ = __buttons
+
+    left_don: bool
+    left_kat: bool
+    right_don: bool
+    right_kat: bool
+
+
+class CTBButtonState(ButtonState):
+    __buttons = ("dash")
+    __slots__ = __buttons
+
+    dash: bool
+
+
+@dataclass(slots=True)
+class ReplayFrameBase(object):
+    frame_time: int  # Frame time elapsed in millisecond
 
 
 @dataclass(slots=True, repr=False)
-class ReplayFrame(object):
-    frame_time: int      # in millisecond
+class StandardReplayFrame(ReplayFrameBase):
     x_coordinate: float  # 0 ~ 512
     y_coordinate: float  # 0 ~ 384
-    button_state: ButtonState
+    button_state: StandardButtonState
 
     def __repr__(self) -> str:
-        return f"{self.frame_time}|{self.x_coordinate}|{self.y_coordinate}|{self.button_state}"
+        return f"{self.frame_time}|{self.x_coordinate:.5f}|{self.y_coordinate:.5f}|{self.button_state}"
+
+
+@dataclass(slots=True, repr=False)
+class ManiaReplayFrame(ReplayFrameBase):
+    button_state: ManiaButtonState
+
+    def __repr__(self) -> str:
+        return f"{self.frame_time}|{self.button_state}|0|0"
+
+
+@dataclass(slots=True, repr=False)
+class TaikoReplayFrame(ReplayFrameBase):
+    button_state: TaikoButtonState
+
+    def __repr__(self) -> str:
+        return f"{self.frame_time}|0|0|{self.button_state}"
+
+
+@dataclass(slots=True, repr=False)
+class CTBReplayFrame(ReplayFrameBase):
+    x_position: float # 0 ~ 512
+    button_state: CTBButtonState
+
+    def __repr__(self) -> str:
+        return f"{self.frame_time}|{self.x_position:.5f}|0|{self.button_state}"
 
 
 class ReplayData(list):
@@ -224,7 +303,7 @@ class ReplayData(list):
             mouseX = float(_chunkData[1])
             mouseY = float(_chunkData[2])
             buttonStates = int(_chunkData[3])
-            if deltaTime == "-12345":
+            if deltaTime == -12345:
                 self.rng_seed = buttonStates
                 continue
 
@@ -232,15 +311,12 @@ class ReplayData(list):
             if i < 2 and mouseX == 256 and mouseY == -500:
                 continue
 
-            if deltaTime < 0:
-                continue
-
             self.append(
-                ReplayFrame(
+                StandardReplayFrame(
                     lastTime,
                     float(mouseX),
                     float(mouseY),
-                    ButtonState(buttonStates)
+                    StandardButtonState(buttonStates)
                 )
             )
 
@@ -248,6 +324,15 @@ class ReplayData(list):
             self[1].frame_time, self[0].frame_time = self[0].frame_time, 0
         if len(self) >= 3 and self[0].frame_time > self[2].frame_time:
             self[0].frame_time = self[1].frame_time = self[2].frame_time
+
+    def append(self, frame) -> None:
+        if isinstance(frame, ReplayFrameBase):
+            super().append(frame)
+        else:
+            raise TypeError(f"Frame must be of type ReplayFrameBase, not {type(frame)}")
+
+    def get_raw(self) -> str:
+        return self.__decompressedLZMAStreamData
 
 
 @dataclass(slots=True, init=False, repr=False)
@@ -262,27 +347,45 @@ class ScoreInfo(object):
     total_score_without_mods: int
     pauses: list
 
+    __empty: bool
     __decompressedLZMAStreamData: str
 
     def __init__(self, rawData: bytes) -> None:
         if not rawData:
+            self.__empty = True
             return
 
+        self.__empty = False
         self.__decompressedLZMAStreamData = lzma.decompress(rawData).decode("utf-8")
         JSONObject = json.loads(self.__decompressedLZMAStreamData)
 
-        self.online_id = JSONObject["online_id"]
-        self.statistics = JSONObject["statistics"]
-        self.maximum_statistics = JSONObject["maximum_statistics"]
-        self.mods = JSONObject["mods"]
-        self.client_version = JSONObject["client_version"]
-        self.rank = JSONObject["rank"]
-        self.user_id = JSONObject["user_id"]
-        self.total_score_without_mods = JSONObject["total_score_without_mods"]
-        self.pauses = JSONObject["pauses"]
+        self.online_id = JSONObject.get("online_id", 0)
+        self.statistics = JSONObject.get("statistics", {})
+        self.maximum_statistics = JSONObject.get("maximum_statistics", {})
+        self.mods = JSONObject.get("mods", [])
+        self.client_version = JSONObject.get("client_version", "")
+        self.rank = JSONObject.get("rank", "")
+        self.user_id = JSONObject.get("user_id", 0)
+        self.total_score_without_mods = JSONObject.get("total_score_without_mods", 0)
+        self.pauses = JSONObject.get("pauses", [])
 
-    def __repr__(self):
-        return f"{self.__decompressedLZMAStreamData}"
+    def __repr__(self) -> str:
+        if self.__empty:
+            return ""
+
+        data = {
+            "online_id": self.online_id,
+            "statistics": self.statistics,
+            "maximum_statistics": self.maximum_statistics,
+            "mods": self.mods,
+            "client_version": self.client_version,
+            "rank": self.rank,
+            "user_id": self.user_id,
+            "total_score_without_mods": self.total_score_without_mods,
+            "pauses": self.pauses,
+        }
+
+        return json.dumps(data)
 
 
 @dataclass(repr=False)
@@ -293,12 +396,17 @@ class LifeFrame(object):
     def __repr__(self):
         return f"{self.frame_time}|{self.percentage}"
 
+
 class LifeData(list):
     def __init__(self, rawLifeFrameData: str):
         super().__init__()
+        self.__rawLifeFrameData = rawLifeFrameData
 
         split = rawLifeFrameData.split(",")
         for chunk in split:
             if chunk:
                 t, p = chunk.split("|", 2)
                 self.append(LifeFrame(int(t), float(p)))
+
+    def get_raw(self) -> str:
+        return self.__rawLifeFrameData
