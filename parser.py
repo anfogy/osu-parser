@@ -1,7 +1,7 @@
 from io import BytesIO
 from pathlib import Path
 from struct import unpack
-from typing import Any
+from typing import Any, Self
 # from hashlib import md5
 from lzma import compress
 
@@ -36,7 +36,7 @@ class Replay(object):
     # endregion
 
     @classmethod
-    def from_bytes(cls, rawData: bytes) -> None:
+    def from_bytes(cls, rawData: bytes) -> Self:
         self = cls.__new__(cls)
         super(Replay, self).__setattr__("_Replay__initialized", False)
 
@@ -45,6 +45,8 @@ class Replay(object):
         self.__attr_init()
 
         super(Replay, self).__setattr__("_Replay__initialized", True)
+
+        return self
 
     def __init__(self, pathStr: str | Path) -> None:
         super(Replay, self).__setattr__("_Replay__initialized", False)
