@@ -1,11 +1,18 @@
+from dataclasses import dataclass
 from io import BytesIO
 from pathlib import Path
 from struct import unpack
 from typing import Any, Self
-# from hashlib import md5
 from lzma import compress
 
-from .structs import *
+from .buffer import BufferReader, ULEB128
+from .enums import DataType, GameMode, Mod
+from .hit_data import HitData
+from .life_frames import LifeData
+from .mod_data import ModData
+from .replay_data import ReplayData
+from .score_info import ScoreInfo
+from .timestamp import DotNetTick
 
 
 @dataclass(init=False, slots=True, repr=False)
@@ -199,8 +206,6 @@ class Replay(object):
                 return to_bytes(len(compressedScoreInfo), dataLength=DataType.Integer) + compressedScoreInfo
 
             return b""
-
-        # replayMD5 = md5(f"lazer-{self.player_name}-{self.timestamp}".encode("utf-8")).hexdigest()
 
         reconstructedReplay = BytesIO()
         reconstructedReplay.write(to_bytes(self.game_mode))
