@@ -221,8 +221,11 @@ class Replay(object):
         reconstructedReplay.write(to_bytes(self.hp_graph))
         reconstructedReplay.write(to_bytes(self.timestamp))
         reconstructedReplay.write(to_bytes(self.replay_frames))
-        reconstructedReplay.write(to_bytes(self.online_score_id, dataLength=DataType.Long))
-        if self.target_practice_hits:
+
+        onlineScoreIDLength = DataType.Integer if self.game_version < 20140721 else DataType.Long
+        reconstructedReplay.write(to_bytes(self.online_score_id, dataLength=onlineScoreIDLength))
+
+        if self.target_practice_hits is not None:
             reconstructedReplay.write(to_bytes(self.target_practice_hits, dataLength=DataType.Long))
         if self.score_info:
             reconstructedReplay.write(to_bytes(self.score_info))
