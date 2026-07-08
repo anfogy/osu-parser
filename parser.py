@@ -105,7 +105,7 @@ class Replay(object):
         self.timestamp = DotNetTick(self.__read(DataType.Long))
         # Replay data
         self.__LZMAStreamLength = self.__read(DataType.Integer)
-        self.replay_frames = ReplayData(self.__read(self.__LZMAStreamLength))
+        self.replay_frames = ReplayData(self.__read(self.__LZMAStreamLength), self.game_mode)
         # Online score ID
         if self.game_version >= 20140721:
             self.online_score_id = self.__read(DataType.Long)
