@@ -5,7 +5,7 @@ from struct import unpack
 from typing import Any, Self
 from lzma import compress
 
-from .buffer import BufferReader, ULEB128
+from .uleb128 import ULEB128
 from .enums import DataType, GameMode, Mod
 from .hit_data import HitData
 from .life_frames import LifeData
@@ -37,7 +37,7 @@ class Replay(object):
     score_info: ScoreInfo | None
 
     __initialized: bool
-    __buffer: BufferReader
+    __buffer: BytesIO
     __LZMAStreamLength: int
     __ScoreInfoStreamLength: int
     # endregion
@@ -48,7 +48,7 @@ class Replay(object):
         super(Replay, self).__setattr__("_Replay__initialized", False)
 
         self.path = None
-        self.__buffer = BufferReader(rawData)
+        self.__buffer = BytesIO(rawData)
         self.__attr_init()
 
         super(Replay, self).__setattr__("_Replay__initialized", True)
@@ -65,7 +65,7 @@ class Replay(object):
 
         with open(pathObj, "rb") as f:
             rawData = f.read()
-        self.__buffer = BufferReader(rawData)
+        self.__buffer = BytesIO(rawData)
 
         self.__attr_init()
 
@@ -167,7 +167,7 @@ class Replay(object):
             raise ValueError(f"Unsupported DataType: {dataLength}")
 
     def get_raw_data(self) -> bytes:
-        return bytes(self.__buffer)
+        return self.__buffer.getvalue()
 
     def reconstruct_replay(self) -> None:
         def to_bytes(data: Any, **kwargs) -> bytes:
@@ -230,7 +230,7 @@ class Replay(object):
         if self.score_info:
             reconstructedReplay.write(to_bytes(self.score_info))
 
-        self.__buffer = BufferReader(reconstructedReplay.getvalue())
+        self.__buffer = BytesIO(reconstructedReplay.getvalue())
         self.__attr_init()
 
     def write_to_file(self, path: str | Path = None, do_reconstruct: bool = True) -> None:
@@ -245,6 +245,6 @@ class Replay(object):
             self.reconstruct_replay()
 
         with open(path, "wb") as f:
-            f.write(self.__buffer)
+            f.write(self.__buffer.getbuffer())
 
         print("Replay saved to {}".format(path))

@@ -1,16 +1,3 @@
-class BufferReader(bytearray):
-    __slots__ = ("__pointer",)
-
-    def __init__(self, source=None) -> None:
-        super().__init__(source)
-        self.__pointer = 0
-
-    def read(self, n: int) -> bytes:
-        chunk = self[self.__pointer:self.__pointer + n]
-        self.__pointer += len(chunk)
-        return bytes(chunk)
-
-
 class ULEB128(object):
     def __init__(self, value: int | bytes | bytearray):
         if isinstance(value, int):
