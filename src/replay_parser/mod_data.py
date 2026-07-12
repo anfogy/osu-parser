@@ -1,4 +1,4 @@
-from replayparser.enums import Mod
+from replayparser.src.replay_parser.enums import Mod
 
 
 class ModData(list):
