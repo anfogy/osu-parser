@@ -13,8 +13,8 @@ class DataType(Enum):
 class GameMode(Enum):
     Standard = 0
     Taiko = 1
-    CTB = 3
-    Mania = 4
+    CTB = 2
+    Mania = 3
 
 
 class Mod(Enum):
