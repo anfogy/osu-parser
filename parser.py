@@ -226,7 +226,7 @@ class Replay(object):
         reconstructedReplay.write(to_bytes(self.online_score_id, dataLength=onlineScoreIDLength))
 
         if self.target_practice_hits is not None:
-            reconstructedReplay.write(to_bytes(self.target_practice_hits, dataLength=DataType.Long))
+            reconstructedReplay.write(to_bytes(self.target_practice_hits, dataLength=DataType.Integer))
         if self.score_info:
             reconstructedReplay.write(to_bytes(self.score_info))
 
