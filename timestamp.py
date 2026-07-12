@@ -24,7 +24,7 @@ class DotNetTick(datetime):
 
     @property
     def ticks(self) -> int:
-        return 621355968000000000 + int(self.timestamp() * 10_000_000)
+        return self.__ticks
 
     def __str__(self) -> str:
         return self.strftime("%m/%d/%Y %H:%M:%S %:z")
