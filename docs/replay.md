@@ -66,5 +66,4 @@ r.player_name = "NewName"          # Python allows attribute modification
 r.write_to_file("output.osr")      # Automatically reconstructs, then saves
 ```
 
-**Important**: Modification and reconstruction do **not** update the `replay_md5`.
-I personally have not figured out how this is calculated, but it is [openly accessible](https://github.com/ppy/osu/blob/1164870d12bd5b9714bbffa97e809bee33458799/osu.Game/Scoring/Legacy/LegacyScoreEncoder.cs#L104).
+For now, reconstructions of osu!stable replays do **not** update the `replay_md5` hash.

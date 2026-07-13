@@ -1,3 +1,4 @@
+import hashlib
 from dataclasses import dataclass
 from io import BytesIO
 from pathlib import Path
@@ -102,7 +103,7 @@ class Replay(object):
         self.perfect_fc = bool(self.__read(DataType.Byte))
         self.mods = ModData(self.__read(DataType.Integer))
         self.hp_graph = LifeData(self.__read(DataType.String))
-        self.timestamp = DotNetTick(self.__read(DataType.Long))
+        self.timestamp = DotNetTick(self.__read(DataType.Long), self.player_name, self.replay_md5, self.game_version)
         # Replay data
         self.__LZMAStreamLength = self.__read(DataType.Integer)
         self.replay_frames = ReplayData(self.__read(self.__LZMAStreamLength), self.game_mode)
@@ -207,12 +208,16 @@ class Replay(object):
 
             return b""
 
+        replayMD5 = self.replay_md5
+        if self.game_version >= 30000001:
+            replayMD5 = hashlib.md5(f"lazer-{self.player_name}-{self.timestamp}".encode("utf-8")).hexdigest()
+
         reconstructedReplay = BytesIO()
         reconstructedReplay.write(to_bytes(self.game_mode))
         reconstructedReplay.write(to_bytes(self.game_version, dataLength=DataType.Integer))
         reconstructedReplay.write(to_bytes(self.beatmap_md5))
         reconstructedReplay.write(to_bytes(self.player_name))
-        reconstructedReplay.write(to_bytes(self.replay_md5))
+        reconstructedReplay.write(to_bytes(replayMD5))
         reconstructedReplay.write(to_bytes(self.hit_data))
         reconstructedReplay.write(to_bytes(self.total_score, dataLength=DataType.Integer))
         reconstructedReplay.write(to_bytes(self.max_combo, dataLength=DataType.Short))
