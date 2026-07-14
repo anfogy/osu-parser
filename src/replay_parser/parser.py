@@ -2,7 +2,7 @@ import hashlib
 from dataclasses import dataclass
 from io import BytesIO
 from pathlib import Path
-from struct import unpack
+from struct import unpack, pack
 from typing import Any, Self
 from lzma import compress
 
@@ -34,7 +34,7 @@ class Replay(object):
     timestamp: DotNetTick
     replay_frames: ReplayData
     online_score_id: int
-    target_practice_hits: int | None
+    target_practice_hits: float | None
     score_info: ScoreInfo | None
 
     __initialized: bool
@@ -116,7 +116,7 @@ class Replay(object):
             self.online_score_id = -1
         # Target practice
         if self.mods.get_raw() & Mod.TargetPractice.value:
-            self.target_practice_hits = self.__read(DataType.Integer)
+            self.target_practice_hits = unpack('<d', self.__read(8))[0]
         else:
             self.target_practice_hits = None
         # osu!lazer score info
@@ -205,6 +205,8 @@ class Replay(object):
             elif isinstance(data, ScoreInfo):
                 compressedScoreInfo = compress(repr(data).encode("utf-8"), format=2)
                 return to_bytes(len(compressedScoreInfo), dataLength=DataType.Integer) + compressedScoreInfo
+            elif isinstance(data, float):
+                return pack('<d', data)
 
             return b""
 
@@ -231,7 +233,7 @@ class Replay(object):
         reconstructedReplay.write(to_bytes(self.online_score_id, dataLength=onlineScoreIDLength))
 
         if self.target_practice_hits is not None:
-            reconstructedReplay.write(to_bytes(self.target_practice_hits, dataLength=DataType.Integer))
+            reconstructedReplay.write(to_bytes(self.target_practice_hits))
         if self.score_info:
             reconstructedReplay.write(to_bytes(self.score_info))
 
