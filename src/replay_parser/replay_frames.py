@@ -1,6 +1,6 @@
 from dataclasses import dataclass
 
-from replayparser.src.replay_parser.button_states import StandardButtonState, ManiaButtonState, TaikoButtonState, CTBButtonState
+from .button_states import StandardButtonState, ManiaButtonState, TaikoButtonState, CTBButtonState
 
 
 @dataclass(slots=True)

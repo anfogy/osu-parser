@@ -1,8 +1,8 @@
 import lzma
 
-from replayparser.src.replay_parser.button_states import StandardButtonState, TaikoButtonState, CTBButtonState, ManiaButtonState
-from replayparser.src.replay_parser.enums import GameMode
-from replayparser.src.replay_parser.replay_frames import StandardReplayFrame, ReplayFrameBase, TaikoReplayFrame, CTBReplayFrame, \
+from .button_states import StandardButtonState, TaikoButtonState, CTBButtonState, ManiaButtonState
+from .enums import GameMode
+from .replay_frames import StandardReplayFrame, ReplayFrameBase, TaikoReplayFrame, CTBReplayFrame, \
     ManiaReplayFrame
 
 
