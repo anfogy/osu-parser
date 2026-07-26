@@ -1,0 +1,124 @@
+# MIT License
+#
+# Copyright (c) 2021 Lenforiee
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in all
+# copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+# SOFTWARE.
+
+# The following code based on Lenforiee's work (osupyparser), modified by caibi
+# https://github.com/lenforiee/osupyparser/
+
+from enum import Enum
+from typing import List
+from typing import Optional
+from typing import Any
+from dataclasses import dataclass
+
+OSU_FILE_HEADER = "osu file format v"
+
+@dataclass
+class CurveType(Enum):
+    Catmull = "C"
+    Bezier = "B"
+    Linear = "L"
+    PassThrough = "P"
+
+@dataclass
+class ObjectType(int):
+  CIRCLE = 1
+  SLIDER = 1 << 1
+  NEW_COMBO = 1 << 2
+  SPINNER = 1 << 3
+  COMBO_OFFSET = (1 << 4) | (1 << 5) | (1 << 6)
+  HOLD = 1 << 7
+
+@dataclass
+class Position:
+    """A (x, y) coordinates class."""
+    x: int
+    y: int
+
+    def __getitem__(self, item):
+        if item == 0:
+            return self.x
+        elif item == 1:
+            return self.y
+
+        raise IndexError
+
+
+@dataclass
+class Additions:
+    """Represents a additions to hitobject class."""
+    normal: Optional[str] = ""
+    additional: Optional[str] = ""
+    custom_sample_index: Optional[int] = ""
+    volume: Optional[int] = 0
+    filename: Optional[Any] = None
+
+@dataclass
+class Edge:
+    """An additional class for slider edges."""
+    sound_types: List[str]
+    additions: Optional[Additions]
+
+@dataclass
+class TimingPoint:
+    """Represents a standalone timing point."""
+    offset: float
+    beat_length: float
+    time_signature: int
+    sample_set_id: int
+    custom_sample_index: int
+    sample_volume: int
+    timing_change: Optional[bool]
+    kiai_time_active: Optional[bool]
+    velocity: Optional[float] = None
+    bpm: Optional[float] = None
+
+@dataclass
+class HitObject:
+    """Subclass representing standalone hitobject."""
+    pos: Position
+    start_time: int
+    new_combo: bool
+    sound_enum: int
+
+@dataclass
+class Circle(HitObject):
+    """Represents one circle object."""
+    additions: Optional[Additions] = None
+
+@dataclass
+class Spinner(HitObject):
+    """Represents one spinner object."""
+    end_time: int
+    additions: Optional[Additions] = None
+
+@dataclass
+class Slider(HitObject):
+    """Represents one slider object."""
+    repeat_count: int
+    pixel_length: int
+    edges: list[Edge]
+    points: List[Position]
+    duration: int
+    end_time: int
+    curve_type: str
+    end_position: Optional[Position]
+    additions: Optional[Additions] = None
