@@ -24,6 +24,8 @@ class MapSettings:
 
 @dataclass(init=False, slots=True)
 class Map(object):
+    map_data: OsuFile
+
     ar: float
     od: float
     cs: float
@@ -32,20 +34,19 @@ class Map(object):
     map_settings: MapSettings
     timing_points: List[TimingPoint]
 
-    _map_data: OsuFile
     _stack_leniency: float
     _preempt: int
     _timing_point_offsets: List[float]
 
     def __init__(self, map_path: str):
-        self._map_data = OsuFile(map_path).parse_file()
+        self.map_data = OsuFile(map_path).parse_file()
 
-        self.ar = self._map_data.ar
-        self.od = self._map_data.od
-        self.cs = self._map_data.cs
-        self.slider_tick_rate = self._map_data.slider_tick_rate
-        self.slider_multiplier = self._map_data.slider_multiplier
-        self._stack_leniency = self._map_data.stack_leniency
+        self.ar = self.map_data.ar
+        self.od = self.map_data.od
+        self.cs = self.map_data.cs
+        self.slider_tick_rate = self.map_data.slider_tick_rate
+        self.slider_multiplier = self.map_data.slider_multiplier
+        self._stack_leniency = self.map_data.stack_leniency
         self._preempt = 1200 + 120 * (5 - self.ar) if self.ar < 5 else 1200 - 150 * (self.ar - 5) if self.ar > 5 else 1200
         self.map_settings = MapSettings(
             circle_radius=(54.4 - 4.48 * self.cs) * 1.00041 * 0.9,
@@ -64,12 +65,12 @@ class Map(object):
         )
 
         # For fast look-ups
-        self._timing_point_offsets = [pt.offset for pt in self._map_data.timing_points]
+        self._timing_point_offsets = [pt.offset for pt in self.map_data.timing_points]
 
-        self.timing_points = self._map_data.timing_points
+        self.timing_points = self.map_data.timing_points
 
     def get_hit_objects(self):
-        return self._map_data.hit_objects
+        return self.map_data.hit_objects
 
     def get_last_uninherited_timing_point(self, offset: int) -> TimingPoint:
         LUT = self.timing_points

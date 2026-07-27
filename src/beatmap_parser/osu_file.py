@@ -81,7 +81,7 @@ class OsuFile:
         self.has_video: bool = False
         self.video_file: str = ""
         self.background_file: str = ""
-        self.break_times: List[List[int, int]] = []
+        self.break_times: List[List[int]] = []
         self.break_time: int = 0
         self.storyboards: list = []
 
@@ -333,7 +333,7 @@ class OsuFile:
                 new_combo=new_combo,
                 sound_enum=sound,
                 repeat_count=int(data[6]),
-                pixel_length=float(data[7]),
+                pixel_length=int(data[7]),
                 edges=edges,
                 points=points_list,
                 duration=duration,
@@ -354,7 +354,8 @@ class OsuFile:
         self.total_hits += 1
         self.hit_objects.append(hitobject)
 
-    def parse_addition(self, line: str) -> Optional[Additions]:
+    @staticmethod
+    def parse_addition(line: str) -> Optional[Additions]:
         """Parses addictional hitobject data."""
         if not line: return None
 
@@ -405,7 +406,7 @@ class OsuFile:
                 combo += 1
                 continue
 
-            while next_offset != None and hitobject.start_time >= next_offset:
+            while next_offset is not None and hitobject.start_time >= next_offset:
                 index += 1
                 if len(timings) > index + 1:
                     next_offset = timings[index + 1].offset
