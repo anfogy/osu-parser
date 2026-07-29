@@ -99,6 +99,9 @@ class HitObject:
     new_combo: bool
     sound_enum: int
 
+    def get_end_time(self):
+        return self.end_time if hasattr(self, "end_time") else self.start_time
+
 @dataclass
 class Circle(HitObject):
     """Represents one circle object."""
@@ -119,6 +122,22 @@ class Slider(HitObject):
     points: List[Position]
     duration: int
     end_time: int
-    curve_type: str
+    curve_type: CurveType
     end_position: Optional[Position]
     additions: Optional[Additions] = None
+
+@dataclass
+class Color(object):
+    r: int
+    g: int
+    b: int
+
+    def __getitem__(self, item):
+        if item == 0:
+            return self.r
+        elif item == 1:
+            return self.g
+        elif item == 2:
+            return self.b
+
+        raise IndexError

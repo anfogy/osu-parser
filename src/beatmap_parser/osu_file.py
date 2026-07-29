@@ -25,245 +25,288 @@
 
 import hashlib
 import math
-from typing import List, Dict, Optional
+from dataclasses import dataclass
+from io import BytesIO
+from pathlib import Path
+from typing import Self
 
 from .objects import Position, Additions, Edge, TimingPoint, \
     HitObject, Circle, Spinner, Slider, \
-    CurveType, ObjectType, OSU_FILE_HEADER
+    CurveType, ObjectType, OSU_FILE_HEADER, Color
 
+
+@dataclass(init=False, slots=True, repr=False)
 class OsuFile:
-    """A class representing all data from .osu file."""
+    path: Path | None
+    file_version: int
 
-    def __init__(self, file_path: str):
-        self.__file_path: str = file_path
+    # [General]
+    audio_filename: str
+    audio_lead_in: int
+    preview_time: int
+    countdown: int
+    sample_set: str
+    stack_leniency: float
+    mode: int
+    letterbox_in_breaks: bool
+    widescreen_storyboard: bool
 
-        # Header of file.
-        self.file_version: int = 0
+    # [Editor]
+    distance_spacing: float
+    beat_divisor: int
+    grid_size: int
+    timeline_zoom: float
 
-        # General section.
-        self.audio_filename: str = ""
-        self.audio_lead_in: int = 0
-        self.preview_time: int = 0
-        self.countdown: int = 0
-        self.sample_set: str = ""
-        self.stack_leniency: float = 0.0
-        self.mode: int = 0
-        self.letterbox_in_breaks: bool = False
-        self.widescreen_storyboard: bool = False
+    # [Metadata]
+    title: str
+    title_unicode: str
+    artist: str
+    artist_unicode: str
+    creator: str
+    version: str
+    source: str
+    tags: str
+    beatmap_id: int
+    beatmap_set_id: int
 
-        # Editor section.
-        self.distance_spacing: float = 0.0
-        self.beat_divisor: int = 0
-        self.grid_size: int = 0
-        self.timeline_zoom: float = 0.0
+    # [Difficulty]
+    hp: float
+    cs: float
+    od: float
+    ar: float
+    slider_multiplier: float
+    slider_tick_rate: int
 
-        # Metadata section.
-        self.title: str = ""
-        self.title_unicode: str = ""
-        self.artist: str = ""
-        self.artist_unicode: str = ""
-        self.creator: str = ""
-        self.version: str = ""
-        self.source: str = ""
-        self.tags: str = ""
-        self.beatmap_id: int = 0
-        self.beatmap_set_id: int = 0
+    # [Events]
+    has_video: bool
+    video_file: str
+    background_file: str
+    break_times: list[tuple[int, int]]
+    storyboards: list
 
-        # Difficulty section.
-        self.hp: float = 0.0
-        self.cs: float = 0.0
-        self.od: float = 0.0
-        self.ar: float = 0.0
-        self.slider_multiplier: float = 0.0
-        self.slider_tick_rate: int = 0
+    # [TimingPoints]
+    timing_points: list[TimingPoint]
 
-        # Events section.
-        self.has_video: bool = False
-        self.video_file: str = ""
-        self.background_file: str = ""
-        self.break_times: List[List[int]] = []
-        self.break_time: int = 0
-        self.storyboards: list = []
+    # [Colours]
+    colors: dict[str, Color]
 
-        # TimingPoints section.
-        self.timing_points: List[TimingPoint] = []
+    # [HitObjects]
+    hit_objects: list[HitObject]
 
-        # Colours section.
-        self.colours: Dict[str, tuple] = {}
+    # Calculated / extra
+    md5: str
+    max_combo: int
+    bpm: int
+    total_hits: int
+    play_time: float
+    drain_time: float
+    ncircles: int
+    nsliders: int
+    nspinners: int
 
-        # HitObjects section.
-        self.hit_objects: List[HitObject] = []
+    __buffer: BytesIO
 
-        # External data.
-        self.md5: str = ""
-        self.max_combo: int = 0
-        self.bpm: int = -1
-        self.total_hits: int = 0
-        self.play_time: float = 0.0
-        self.drain_time: float = 0.0
-        self.ncircles: int = 0
-        self.nsliders: int = 0
-        self.nspinners: int = 0
+    def __init__(self, file_path: str | Path) -> None:
+        self.path = Path(file_path).expanduser().resolve()
+        if not self.path.exists():
+            raise FileNotFoundError(f"Beatmap file not found: {self.path}")
+        raw = self.path.read_bytes()
+        self.__buffer = BytesIO(raw)
+        self.__attr_init()
 
-    def parse_file(self):
-        """Parses sections and set them to class variables."""
+    @classmethod
+    def from_bytes(cls, raw_data: bytes) -> Self:
+        self = cls.__new__(cls)
+        self.path = None
+        self.__buffer = BytesIO(raw_data)
+        self.__attr_init()
+        return self
 
-        with open(self.__file_path, "rb") as stream:
-            buffer = stream.read()
-        lines = list(map(lambda x: x.strip(), buffer.decode("utf-8-sig").split("\n")))  # Strip lines.
-        self.md5 = hashlib.md5(buffer).digest().hex()
+    def __attr_init(self) -> None:
+        raw = self.__buffer.getvalue()
+        self.md5 = hashlib.md5(raw).hexdigest()
+        content = raw.decode("utf-8-sig")
+        lines = [line.strip() for line in content.split("\n")]
 
-        header_line = lines[0]
-        if header_line[:len(OSU_FILE_HEADER)] != OSU_FILE_HEADER:
-            # First line should have osu special header.
-            raise ValueError(f"Unknown file error! Excepted: {OSU_FILE_HEADER}, got {header_line}")
-        self.file_version = int(header_line[len(OSU_FILE_HEADER):])
+        # Header
+        if not lines or not lines[0].startswith(OSU_FILE_HEADER):
+            raise ValueError(f"Invalid file header – expected {OSU_FILE_HEADER}")
+        self.file_version = int(lines[0][len(OSU_FILE_HEADER):])
 
-        section_name = ""
+        #region Initialise fields
+        self.audio_filename = ""
+        self.audio_lead_in = 0
+        self.preview_time = 0
+        self.countdown = 0
+        self.sample_set = ""
+        self.stack_leniency = 0.0
+        self.mode = 0
+        self.letterbox_in_breaks = False
+        self.widescreen_storyboard = False
+
+        self.distance_spacing = 0.0
+        self.beat_divisor = 0
+        self.grid_size = 0
+        self.timeline_zoom = 0.0
+
+        self.title = ""
+        self.title_unicode = ""
+        self.artist = ""
+        self.artist_unicode = ""
+        self.creator = ""
+        self.version = ""
+        self.source = ""
+        self.tags = ""
+        self.beatmap_id = 0
+        self.beatmap_set_id = 0
+
+        self.hp = 0.0
+        self.cs = 0.0
+        self.od = 0.0
+        self.ar = 0.0
+        self.slider_multiplier = 0.0
+        self.slider_tick_rate = 0
+
+        self.has_video = False
+        self.video_file = ""
+        self.background_file = ""
+        self.break_times = []
+        self.storyboards = []
+
+        self.timing_points = []
+        self.colors = {}
+        self.hit_objects = []
+
+        # Counters that will be incremented during hit‑object parsing
+        self.ncircles = 0
+        self.nsliders = 0
+        self.nspinners = 0
+        self.total_hits = 0
+
+        # Derived values
+        self.bpm = -1
+        self.max_combo = 0
+        self.play_time = 0.0
+        self.drain_time = 0.0
+        #endregion
+
+        # Parse sections
+        current_section = ""
         for line in lines[1:]:
-            if not line: continue  # Just continue looping.
-
-            if line[0] == "[" and line[-1] == "]":
-                section_name = line[1:-1].lower()
+            if not line:
                 continue
+            if line.startswith("[") and line.endswith("]"):
+                current_section = line[1:-1].lower()
+                continue
+            if current_section:
+                parser = getattr(self, f"_parse_{current_section}", None)
+                if parser:
+                    parser(line)
 
-            # Call parser to take care of it.
-            section_parser = getattr(self, f"{section_name}_parser", None)
-            if not section_parser: continue
-            section_parser(line)
+        # Derived statistics
+        self._calculate_derived()
 
-        self.calculate_minor_things()
-        self.calculate_max_combo()
-        return self  # Return self as some people would want to make one line parsing.
+    def _apply_key_mapping(self, line: str,
+                           mapping: list[tuple[str, str, callable]]) -> None:
+        for key, attr, convert in mapping:
+            prefix = f"{key}:"
+            if line.startswith(prefix):
+                value_str = line[len(prefix):].strip()
+                setattr(self, attr, convert(value_str))
+                return
 
-    def general_parser(self, line: str) -> None:
-        """Parses [General] header data."""
-        if "AudioFilename" in line:
-            self.audio_filename = line.split("AudioFilename:")[1].strip()
-        elif "AudioLeadIn" in line:
-            self.audio_lead_in = int(line.split("AudioLeadIn:")[1].strip())
-        elif "PreviewTime" in line:
-            self.preview_time = int(line.split("PreviewTime:")[1].strip())
-        elif "Countdown" in line:
-            self.countdown = int(line.split("Countdown:")[1].strip())
-        elif "SampleSet" in line:
-            self.sample_set = line.split("SampleSet:")[1].strip()
-        elif "StackLeniency" in line:
-            self.stack_leniency = float(line.split("StackLeniency:")[1].strip())
-        elif "Mode" in line:
-            self.mode = int(line.split("Mode:")[1].strip())
-        elif "LetterboxInBreaks" in line:  # Making it bool.
-            self.letterbox_in_breaks = "1" == line.split("LetterboxInBreaks:")[1].strip()
-        elif "WidescreenStoryboard" in line:  # Same here.
-            self.widescreen_storyboard = "1" == line.split("WidescreenStoryboard:")[1].strip()
+    def _parse_general(self, line: str) -> None:
+        self._apply_key_mapping(line, [
+            ("AudioFilename",       "audio_filename",       str),
+            ("AudioLeadIn",         "audio_lead_in",        int),
+            ("PreviewTime",         "preview_time",         int),
+            ("Countdown",           "countdown",            int),
+            ("SampleSet",           "sample_set",           str),
+            ("StackLeniency",       "stack_leniency",       float),
+            ("Mode",                "mode",                 int),
+            ("LetterboxInBreaks",   "letterbox_in_breaks",  lambda v: v == "1"),
+            ("WidescreenStoryboard","widescreen_storyboard",lambda v: v == "1"),
+        ])
 
-    def editor_parser(self, line: str) -> None:
-        """Parses [Editor] header data."""
-        if "DistanceSpacing" in line:
-            self.distance_spacing = float(line.split("DistanceSpacing:")[1].strip())
-        elif "BeatDivisor" in line:
-            self.beat_divisor = int(line.split("BeatDivisor:")[1].strip())
-        elif "GridSize" in line:
-            self.grid_size = int(line.split("GridSize:")[1].strip())
-        elif "TimelineZoom" in line:
-            self.timeline_zoom = float(line.split("TimelineZoom:")[1].strip())
+    def _parse_editor(self, line: str) -> None:
+        self._apply_key_mapping(line, [
+            ("DistanceSpacing", "distance_spacing", float),
+            ("BeatDivisor",     "beat_divisor",     int),
+            ("GridSize",        "grid_size",        int),
+            ("TimelineZoom",    "timeline_zoom",    float),
+        ])
 
-    def metadata_parser(self, line: str) -> None:
-        """Parses [Metadata] header data."""
-        if "Title:" in line:
-            self.title = line.split("Title:")[1].strip()
-        elif "TitleUnicode" in line:
-            self.title_unicode = line.split("TitleUnicode:")[1].strip()
-        elif "Artist:" in line:
-            self.artist = line.split("Artist:")[1].strip()
-        elif "ArtistUnicode" in line:
-            self.artist_unicode = line.split("ArtistUnicode:")[1].strip()
-        elif "Creator" in line:
-            self.creator = line.split("Creator:")[1].strip()
-        elif "Version" in line:
-            self.version = line.split("Version:")[1].strip()
-        elif "Source" in line:
-            self.source = line.split("Source:")[1].strip()
-        elif "Tags" in line:
-            self.tags = line.split("Tags:")[1].strip()
-        elif "BeatmapID" in line:
-            self.beatmap_id = int(line.split("BeatmapID:")[1].strip())
-        elif "BeatmapSetID" in line:
-            self.beatmap_set_id = int(line.split("BeatmapSetID:")[1].strip())
+    def _parse_metadata(self, line: str) -> None:
+        self._apply_key_mapping(line, [
+            ("Title",          "title",          str),
+            ("TitleUnicode",   "title_unicode",  str),
+            ("Artist",         "artist",         str),
+            ("ArtistUnicode",  "artist_unicode", str),
+            ("Creator",        "creator",        str),
+            ("Version",        "version",        str),
+            ("Source",         "source",         str),
+            ("Tags",           "tags",           str),
+            ("BeatmapID",      "beatmap_id",     int),
+            ("BeatmapSetID",   "beatmap_set_id", int),
+        ])
 
-    def difficulty_parser(self, line: str) -> None:
-        """Parses [Difficulty] header data."""
-        if "HPDrainRate" in line:
-            self.hp = float(line.split("HPDrainRate:")[1].strip())
-        elif "CircleSize" in line:
-            self.cs = float(line.split("CircleSize:")[1].strip())
-        elif "OverallDifficulty" in line:
-            self.od = float(line.split("OverallDifficulty:")[1].strip())
-        elif "ApproachRate" in line:
-            self.ar = float(line.split("ApproachRate:")[1].strip())
-        elif "SliderMultiplier" in line:
-            self.slider_multiplier = float(line.split("SliderMultiplier:")[1].strip())
-        elif "SliderTickRate" in line:
-            self.slider_tick_rate = float(line.split("SliderTickRate:")[1].strip())
+    def _parse_difficulty(self, line: str) -> None:
+        self._apply_key_mapping(line, [
+            ("HPDrainRate",       "hp",                float),
+            ("CircleSize",        "cs",                float),
+            ("OverallDifficulty", "od",                float),
+            ("ApproachRate",      "ar",                float),
+            ("SliderMultiplier",  "slider_multiplier", float),
+            ("SliderTickRate",    "slider_tick_rate",  int),
+        ])
 
-    def events_parser(self, line: str) -> None:
-        """Parses [Events] header data."""
-        if not "//" in line:
-            data = line.split(",")
-
-            if data and data[0] == "Video":
-                self.has_video = True
-                self.video_file = data[2]
-                if data[2][0] == '"':
-                    self.video_file = data[2][1:-1]
-
-            elif data and data[0] == "0" and data[1] == "0":
-                # Its most likely background.
-                self.background_file = data[2]
-                if data[2][0] == '"':  # Fix it then.
-                    self.background_file = data[2][1:-1]
-
-            elif data and data[0] == "2":
-                self.break_times.append([int(data[1]), int(data[2])])
-
-    # Taken from https://github.com/nojhamster/osu-parser/blob/539b73e087d46de7aa7159476c7ea6ac50983c97/index.js#L99
-    def timingpoints_parser(self, line: str) -> None:
-        """Parses [TimingPoints] header data."""
+    def _parse_events(self, line: str) -> None:
+        if "//" in line:
+            return
         data = line.split(",")
-        point = TimingPoint(
-            offset=float(data[0]),
-            beat_length=float(data[1]),
+        if not data:
+            return
+
+        if data[0] == "Video":
+            self.has_video = True
+            self.video_file = data[2].strip('"')
+        elif data[0] == "0" and data[1] == "0":
+            self.background_file = data[2].strip('"')
+        elif data[0] == "2":
+            self.break_times.append((int(data[1]), int(data[2])))
+
+    def _parse_timingpoints(self, line: str) -> None:
+        parts = line.split(",")
+        tp = TimingPoint(
+            offset=float(parts[0]),
+            beat_length=float(parts[1]),
             velocity=1,
-            time_signature=int(data[2]),
-            sample_set_id=int(data[3]),
-            custom_sample_index=int(data[4]),
-            sample_volume=int(data[5]),
-            timing_change=None if not len(data) > 6 else '1' == data[6],
-            kiai_time_active=None if not len(data) > 7 else '1' == data[7]
+            time_signature=int(parts[2]),
+            sample_set_id=int(parts[3]),
+            custom_sample_index=int(parts[4]),
+            sample_volume=int(parts[5]),
+            timing_change=None if len(parts) <= 6 else parts[6] == "1",
+            kiai_time_active=None if len(parts) <= 7 else parts[7] == "1",
         )
 
-        if point.beat_length:
-            if len(self.timing_points) == 0:
-                # Only first index contains bpm data.
-                self.bpm = point.bpm = round(60000 / point.beat_length)
+        if tp.beat_length:
+            if not self.timing_points:
+                tp.bpm = round(60000 / tp.beat_length)
+                self.bpm = tp.bpm
             else:
-                # If negative, beat_length is a velocity factor.
-                point.velocity = abs(100 / point.beat_length)
+                tp.velocity = abs(100 / tp.beat_length)
 
-        self.timing_points.append(point)
+        self.timing_points.append(tp)
 
-    def colours_parser(self, line: str) -> None:
-        """Parses [Colours] header data."""
-        name, rgb_colours = line.split(" : " if self.file_version < 128 else ": ")          # Changed for osu!lazer v128 format
-        rgb = rgb_colours.split(",")
+    def _parse_colors(self, line: str) -> None:
+        sep = " : " if self.file_version < 128 else ": "
+        name, rgb_str = line.split(sep, 1)
+        print(rgb_str.split(","))
+        r, g, b = map(int, rgb_str.split(","))
+        self.colors[name.strip()] = Color(r, g, b)
 
-        self.colours |= {name: (int(rgb[0]), int(rgb[1]), int(rgb[2]))}
-
-    # Also taken from https://github.com/nojhamster/osu-parser/blob/539b73e087d46de7aa7159476c7ea6ac50983c97/index.js#L134
-    def hitobjects_parser(self, line: str) -> None:
-        """Parses [HitObjects] header data."""
+    def _parse_hitobjects(self, line: str) -> None:
         data = line.split(",")
-
         _type = int(data[3])
         sound = int(data[4])
         new_combo = (_type & ObjectType.NEW_COMBO) == 4
@@ -271,185 +314,141 @@ class OsuFile:
 
         if _type & ObjectType.CIRCLE:
             self.ncircles += 1
-            hitobject = Circle(
-                pos=pos,
-                start_time=int(data[2]),
-                new_combo=new_combo,
-                sound_enum=sound
-            )
-            if len(data) > 5: hitobject.additions = self.parse_addition(data[5])
+            obj = Circle(pos=pos, start_time=int(data[2]), new_combo=new_combo, sound_enum=sound)
+            if len(data) > 5:
+                obj.additions = self._parse_addition(data[5])
+
         elif _type & ObjectType.SPINNER:
             self.nspinners += 1
-            hitobject = Spinner(
-                pos=pos,
-                start_time=int(data[2]),
-                new_combo=new_combo,
-                sound_enum=sound,
-                end_time=int(data[5])
-            )
-            if len(data) > 6: hitobject.additions = self.parse_addition(data[6])
+            obj = Spinner(pos=pos, start_time=int(data[2]), new_combo=new_combo,
+                          sound_enum=sound, end_time=int(data[5]))
+            if len(data) > 6:
+                obj.additions = self._parse_addition(data[6])
+
         elif _type & ObjectType.SLIDER:
             self.nsliders += 1
             duration = 0
-            curve_type = ""
             points_list = []
             edges = []
 
-            timing = self.get_last_inherited_timing_point(int(data[2]))
+            timing = self._get_last_inherited_timing_point(int(data[2]))
             if timing:
                 px_per_beat = self.slider_multiplier * 100 * timing.velocity
-                beats_count = (float(data[7]) * int(data[6])) / px_per_beat
+                beats = (float(data[7]) * int(data[6])) / px_per_beat
                 if timing.timing_change:
                     multiplier = timing.beat_length
                 else:
-                    last_uninherited_tp = self.get_last_uninherited_timing_point(int(data[2]))
-                    multiplier = last_uninherited_tp.beat_length
-                duration = beats_count * multiplier
+                    uninherited = self._get_last_uninherited_timing_point(int(data[2]))
+                    multiplier = uninherited.beat_length
+                duration = beats * multiplier
 
-            points = ('' if not len(data) > 5 else data[5]).split("|")
-            if points:
-                curve_type = CurveType(points[0])
-                for point in points[1:]:
-                    x, y = point.split(":")
-                    points_list.append(Position(int(x), int(y)))
+            points = (data[5] if len(data) > 5 else "").split("|")
+            curve_type = CurveType(points[0]) if points else None
+            for pt in points[1:]:
+                x, y = pt.split(":")
+                points_list.append(Position(int(x), int(y)))
 
-            edge_sounds = ('' if not len(data) > 8 else data[8]).split("|")
-            edge_additions = ('' if not len(data) > 9 else data[9]).split("|")
+            edge_sounds = (data[8] if len(data) > 8 else "").split("|")
+            edge_adds   = (data[9] if len(data) > 9 else "").split("|")
+            for i in range(int(data[6]) + 1):
+                adds = self._parse_addition(edge_adds[i]) if i < len(edge_adds) else None
+                snd  = edge_sounds[i] if i < len(edge_sounds) else None
+                edges.append(Edge(snd, adds))
 
-            for i in range(0, int(data[6]) + 1):
-                additions = None
-                sound_edge_enum = None
-                if i < len(edge_additions):
-                    additions = self.parse_addition(edge_additions[i])
-
-                if i < len(edge_sounds):
-                    sound_edge_enum = edge_sounds[i]
-
-                edges.append(Edge(sound_edge_enum, additions))
-
-            hitobject = Slider(
-                pos=Position(int(data[0]), int(data[1])),
+            obj = Slider(
+                pos=pos,
                 start_time=int(data[2]),
                 new_combo=new_combo,
                 sound_enum=sound,
                 repeat_count=int(data[6]),
-                pixel_length=int(data[7]),
+                pixel_length=int(float(data[7])),
                 edges=edges,
                 points=points_list,
                 duration=duration,
-                end_time=(int(data[2]) + duration),
+                end_time=int(data[2]) + duration,
                 curve_type=curve_type,
-                end_position=points_list[-1]
+                end_position=points_list[-1] if points_list else pos,
             )
-            if len(data) > 10: hitobject.additions = self.parse_addition(data[10])
+            if len(data) > 10:
+                obj.additions = self._parse_addition(data[10])
         else:
-            # Might be some hitobject I dont know about..
-            hitobject = HitObject(
-                pos=Position(int(data[0]), int(data[1])),
-                start_time=int(data[2]),
-                new_combo=new_combo,
-                sound_enum=sound
-            )
+            obj = HitObject(pos=pos, start_time=int(data[2]), new_combo=new_combo, sound_enum=sound)
 
         self.total_hits += 1
-        self.hit_objects.append(hitobject)
+        self.hit_objects.append(obj)
 
     @staticmethod
-    def parse_addition(line: str) -> Optional[Additions]:
-        """Parses addictional hitobject data."""
-        if not line: return None
+    def _parse_addition(raw: str) -> Additions | None:
+        if not raw:
+            return None
+        samples = {"1": "Normal", "2": "Soft", "3": "Drum"}
+        parts = raw.split(":")
+        kwargs = {}
+        if len(parts) > 0:
+            kwargs["normal"] = samples.get(parts[0])
+        if len(parts) > 1:
+            kwargs["additional"] = samples.get(parts[1])
+        if len(parts) > 2:
+            kwargs["custom_sample_index"] = int(parts[2])
+        if len(parts) > 3:
+            kwargs["volume"] = max(0, int(parts[3]))
+        if len(parts) > 4:
+            kwargs["filename"] = parts[4]
+        return Additions(**kwargs)
 
-        samples = {
-            "1": 'Normal',
-            "2": "Soft",
-            "3": "Drum"
-        }
-        data = line.split(":")
-        addition = {}
-        if not data: return None
-        if len(data) > 0: addition['normal'] = samples.get(data[0], None)
-        if len(data) > 1: addition['additional'] = samples.get(data[1], None)
-        if len(data) > 2: addition['custom_sample_index'] = int(data[2])
-        if len(data) > 3: addition['volume'] = max(0, int(data[3]))
-        if len(data) > 4: addition['filename'] = data[4]
+    def _get_last_inherited_timing_point(self, offset: int) -> TimingPoint | None:
+        for tp in reversed(self.timing_points):
+            if tp.offset <= offset and not tp.timing_change:
+                return tp
+        return self.timing_points[0] if self.timing_points else None
 
-        additional = Additions(**addition)
-        return additional
+    def _get_last_uninherited_timing_point(self, offset: int) -> TimingPoint | None:
+        for tp in reversed(self.timing_points):
+            if tp.offset <= offset and tp.timing_change:
+                return tp
+        return self.timing_points[0] if self.timing_points else None
 
-    def get_last_inherited_timing_point(self, offset: int) -> TimingPoint:
-        """Finds the last inherited timing point with given offset."""
-        for timing in reversed(self.timing_points):
-            if timing.offset <= offset and not timing.timing_change:
-                return timing
+    def _calculate_derived(self) -> None:
+        self._calculate_max_combo()
+        self._calculate_map_duration()
 
-        return self.timing_points[0]
-
-    def get_last_uninherited_timing_point(self, offset: int) -> TimingPoint:
-        """Finds the last uninherited timing point with given offset."""
-        for timing in reversed(self.timing_points):
-            if timing.offset <= offset and timing.timing_change:
-                return timing
-
-        return self.timing_points[0]
-
-    # Reference https://github.com/Francesco149/pyttanko/blob/master/pyttanko.py#L265
-    def calculate_max_combo(self) -> None:
-        """Calculates a combo for map."""
+    def _calculate_max_combo(self) -> None:
         combo = 0
-        timings = self.timing_points
-        index = -1
+        tps = self.timing_points
+        idx = -1
         px_per_beat = None
-        next_offset = -float("inf")
+        next_offset = float("-inf")
 
-        for hitobject in self.hit_objects:
-            if not isinstance(hitobject, Slider):
+        for obj in self.hit_objects:
+            if not isinstance(obj, Slider):
                 combo += 1
                 continue
 
-            while next_offset is not None and hitobject.start_time >= next_offset:
-                index += 1
-                if len(timings) > index + 1:
-                    next_offset = timings[index + 1].offset
+            while next_offset is not None and obj.start_time >= next_offset:
+                idx += 1
+                if len(tps) > idx + 1:
+                    next_offset = tps[idx + 1].offset
                 else:
                     next_offset = None
-
-                timing = timings[index]
-                sv_multiplier = 1.0
-
-                if not timing.timing_change and timing.beat_length < 0:
-                    sv_multiplier = (-100.0 / timing.beat_length)
-
-                px_per_beat = self.slider_multiplier * 100.0 * sv_multiplier
+                tp = tps[idx]
+                sv = 1.0
+                if not tp.timing_change and tp.beat_length < 0:
+                    sv = -100.0 / tp.beat_length
+                px_per_beat = self.slider_multiplier * 100.0 * sv
                 if self.file_version < 8:
-                    px_per_beat /= sv_multiplier
+                    px_per_beat /= sv
 
-            num_beats = (
-                    (hitobject.pixel_length * hitobject.repeat_count) / px_per_beat
-            )
-
-            ticks = int(
-                math.ceil(
-                    (num_beats - 0.1) /
-                    hitobject.repeat_count * self.slider_tick_rate
-                )
-            )
-
-            ticks -= 1
-            ticks *= hitobject.repeat_count
-            ticks += hitobject.repeat_count + 1
-
-            combo += max(0, ticks)
+            beats = (obj.pixel_length * obj.repeat_count) / px_per_beat
+            ticks = math.ceil((beats - 0.1) / obj.repeat_count * self.slider_tick_rate)
+            ticks = max(0, ticks - 1) * obj.repeat_count + obj.repeat_count + 1
+            combo += ticks
 
         self.max_combo = combo
 
-    def calculate_minor_things(self) -> None:
-        """Calculates rest of minor things."""
-        first_obj = self.hit_objects[0]
-        last_obj = self.hit_objects[-1]
-
-        for break_time in self.break_times:
-            self.break_time += (break_time[1] - break_time[0])
-
-        if first_obj and last_obj:
-            self.play_time = math.floor(last_obj.start_time / 1000)
-            self.drain_time = math.floor((last_obj.start_time - first_obj.start_time - self.break_time) / 1000)
+    def _calculate_map_duration(self) -> None:
+        if not self.hit_objects:
+            return
+        first, last = self.hit_objects[0], self.hit_objects[-1]
+        total_break = sum(end - start for start, end in self.break_times)
+        self.play_time = math.floor(last.start_time / 1000)
+        self.drain_time = math.floor((last.start_time - first.start_time - total_break) / 1000)
