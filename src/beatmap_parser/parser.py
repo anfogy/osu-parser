@@ -7,20 +7,10 @@ from .osu_file import OsuFile
 
 
 @dataclass(slots=True)
-class Judgements:
-    i300: int               # max hit error for 300s
-    i100: int               # max hit error for 100s
-    i50: int                # max hit error for 50s
-    miss: int               # max hit error for miss
-    min_spins_per_sec: int
-
-
-@dataclass(slots=True)
 class MapSettings:
     circle_radius: float    # In osu!pixel
     preempt: int            # In ms. The time when hit objects starts fading in before the actual hit time
     stack_window: int       # In ms. preempt * stack leniency
-    judgements: Judgements  # Can be ignored for now
 
 @dataclass(init=False, slots=True)
 class Map(object):
@@ -53,14 +43,6 @@ class Map(object):
             preempt=self._preempt,
             # https://osu.ppy.sh/wiki/en/Beatmap/Stack_leniency#behaviour
             stack_window=floor(self._preempt * self._stack_leniency),
-            # https://osu.ppy.sh/wiki/en/Gameplay/Judgement/osu%21
-            judgements=Judgements(
-                floor(80 - 6 * self.od),
-                floor(140 - 8 * self.od),
-                floor(200 - 10 * self.od),
-                400,
-                floor(1.5 + 0.2 * self.od if self.od < 5 else 1.25 + 0.25 * self.od)
-            )
         )
 
         # For fast look-ups

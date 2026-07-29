@@ -32,7 +32,7 @@ from typing import Self
 
 from .objects import Position, Additions, Edge, TimingPoint, \
     HitObject, Circle, Spinner, Slider, \
-    CurveType, ObjectType, OSU_FILE_HEADER, Color
+    CurveType, ObjectType, OSU_FILE_HEADER, Color, HitWindows
 
 
 @dataclass(init=False, slots=True, repr=False)
@@ -312,16 +312,26 @@ class OsuFile:
         new_combo = (_type & ObjectType.NEW_COMBO) == 4
         pos = Position(int(data[0]), int(data[1]))
 
+        # https://osu.ppy.sh/wiki/en/Gameplay/Judgement/osu%21
+        # https://github.com/ppy/osu/blob/master/osu.Game.Rulesets.Osu/Scoring/OsuHitWindows.cs
+        hit_windows = HitWindows(
+            math.floor(HitWindows.diff_range(self.od, 80, 50, 20)) - 0.5,
+            math.floor(HitWindows.diff_range(self.od, 140, 100, 60)) - 0.5,
+            math.floor(HitWindows.diff_range(self.od, 200, 150, 100)) - 0.5,
+            400,
+            math.floor(1.5 + 0.2 * self.od if self.od < 5 else 1.25 + 0.25 * self.od)
+        )
+
         if _type & ObjectType.CIRCLE:
             self.ncircles += 1
-            obj = Circle(pos=pos, start_time=int(data[2]), new_combo=new_combo, sound_enum=sound)
+            obj = Circle(pos=pos, start_time=int(data[2]), new_combo=new_combo, sound_enum=sound, hit_windows=hit_windows)
             if len(data) > 5:
                 obj.additions = self._parse_addition(data[5])
 
         elif _type & ObjectType.SPINNER:
             self.nspinners += 1
             obj = Spinner(pos=pos, start_time=int(data[2]), new_combo=new_combo,
-                          sound_enum=sound, end_time=int(data[5]))
+                          sound_enum=sound, end_time=int(data[5]), hit_windows=hit_windows)
             if len(data) > 6:
                 obj.additions = self._parse_addition(data[6])
 
@@ -368,11 +378,12 @@ class OsuFile:
                 end_time=int(data[2]) + duration,
                 curve_type=curve_type,
                 end_position=points_list[-1] if points_list else pos,
+                hit_windows = hit_windows
             )
             if len(data) > 10:
                 obj.additions = self._parse_addition(data[10])
         else:
-            obj = HitObject(pos=pos, start_time=int(data[2]), new_combo=new_combo, sound_enum=sound)
+            obj = HitObject(pos=pos, start_time=int(data[2]), new_combo=new_combo, sound_enum=sound, hit_windows=hit_windows)
 
         self.total_hits += 1
         self.hit_objects.append(obj)

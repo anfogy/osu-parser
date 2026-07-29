@@ -48,6 +48,23 @@ class ObjectType(int):
   HOLD = 1 << 7
 
 @dataclass
+class HitWindows(object):
+    great: float    # Hit window for 300s
+    ok: float       # Hit window for 100s
+    meh: float      # Hit window for 50s
+    miss: int       # Hit window for miss
+    min_spins_per_sec: int
+
+    @staticmethod
+    def diff_range(od: float, val_min: float, val_mid: float, val_max: float) -> float:
+        if od > 5:
+            return val_mid + (val_max - val_mid) * ((od - 5) / 5)
+        elif od < 5:
+            return val_mid + (val_mid - val_min) * ((od - 5) / 5)
+        else:
+            return val_mid
+
+@dataclass
 class Position:
     """A (x, y) coordinates class."""
     x: int
@@ -98,6 +115,7 @@ class HitObject:
     start_time: int
     new_combo: bool
     sound_enum: int
+    hit_windows: HitWindows
 
     def get_end_time(self):
         return self.end_time if hasattr(self, "end_time") else self.start_time

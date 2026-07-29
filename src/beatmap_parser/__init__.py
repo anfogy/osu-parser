@@ -1,4 +1,4 @@
-from .parser import Map, MapSettings, Judgements
+from .parser import Map, MapSettings
 from .objects import Position, Additions, Edge, TimingPoint, \
     HitObject, Circle, Spinner, Slider, \
     CurveType, ObjectType, OSU_FILE_HEADER
