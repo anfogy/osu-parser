@@ -1,42 +1,18 @@
-# MIT License
-#
-# Copyright (c) 2021 Lenforiee
-#
-# Permission is hereby granted, free of charge, to any person obtaining a copy
-# of this software and associated documentation files (the "Software"), to deal
-# in the Software without restriction, including without limitation the rights
-# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-# copies of the Software, and to permit persons to whom the Software is
-# furnished to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included in all
-# copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-# SOFTWARE.
-
-# The following code based on Lenforiee's work (osupyparser), modified by caibi
-# https://github.com/lenforiee/osupyparser/
-
 import hashlib
-import math
 from dataclasses import dataclass
-from io import BytesIO
+import math
 from pathlib import Path
-from typing import Self
+from typing import List
 
-from .objects import Position, Additions, Edge, TimingPoint, \
-    HitObject, Circle, Spinner, Slider, \
-    CurveType, ObjectType, OSU_FILE_HEADER, Color, HitWindows
+from .objects import (
+    TimingPoint, HitObject, Circle, Spinner, Slider,
+    Position, Additions, Edge, CurveType, ObjectType, Color, HitWindows,
+    OSU_FILE_HEADER,
+)
 
 
-@dataclass(init=False, slots=True, repr=False)
-class OsuFile:
+@dataclass(init=False)
+class Beatmap:
     path: Path | None
     file_version: int
 
@@ -93,7 +69,7 @@ class OsuFile:
     # [HitObjects]
     hit_objects: list[HitObject]
 
-    # Calculated / extra
+    # Calculated
     md5: str
     max_combo: int
     bpm: int
@@ -104,36 +80,31 @@ class OsuFile:
     nsliders: int
     nspinners: int
 
-    __buffer: BytesIO
+    circle_radius: float
+    preempt: int
+    stack_window: int
 
-    def __init__(self, file_path: str | Path) -> None:
-        self.path = Path(file_path).expanduser().resolve()
+    _stack_leniency: float
+    _timing_point_offsets: List[float]
+
+    def __init__(self, map_path: str | Path):
+        self.path = Path(map_path).expanduser().resolve()
         if not self.path.exists():
             raise FileNotFoundError(f"Beatmap file not found: {self.path}")
+
+        self.__attr_init()
+
+    def __attr_init(self):
         raw = self.path.read_bytes()
-        self.__buffer = BytesIO(raw)
-        self.__attr_init()
-
-    @classmethod
-    def from_bytes(cls, raw_data: bytes) -> Self:
-        self = cls.__new__(cls)
-        self.path = None
-        self.__buffer = BytesIO(raw_data)
-        self.__attr_init()
-        return self
-
-    def __attr_init(self) -> None:
-        raw = self.__buffer.getvalue()
         self.md5 = hashlib.md5(raw).hexdigest()
+
         content = raw.decode("utf-8-sig")
         lines = [line.strip() for line in content.split("\n")]
-
-        # Header
         if not lines or not lines[0].startswith(OSU_FILE_HEADER):
             raise ValueError(f"Invalid file header – expected {OSU_FILE_HEADER}")
         self.file_version = int(lines[0][len(OSU_FILE_HEADER):])
 
-        #region Initialise fields
+        # region Initialize fields
         self.audio_filename = ""
         self.audio_lead_in = 0
         self.preview_time = 0
@@ -188,9 +159,8 @@ class OsuFile:
         self.max_combo = 0
         self.play_time = 0.0
         self.drain_time = 0.0
-        #endregion
+        # endregion
 
-        # Parse sections
         current_section = ""
         for line in lines[1:]:
             if not line:
@@ -203,11 +173,23 @@ class OsuFile:
                 if parser:
                     parser(line)
 
-        # Derived statistics
         self._calculate_derived()
 
-    def _apply_key_mapping(self, line: str,
-                           mapping: list[tuple[str, str, callable]]) -> None:
+        self._stack_leniency = self.stack_leniency
+        self.preempt = (
+            1200 + 120 * (5 - self.ar) if self.ar < 5
+            else 1200 - 150 * (self.ar - 5) if self.ar > 5
+            else 1200
+        )
+        self.circle_radius = (54.4 - 4.48 * self.cs) * 1.00041 * 0.9
+        self.stack_window = math.floor(self.preempt * self._stack_leniency)
+
+        # For fast look-ups
+        self._timing_point_offsets = [tp.offset for tp in self.timing_points]
+
+        self._apply_stacking()
+
+    def _apply_key_mapping(self, line: str, mapping: list[tuple[str, str, callable]]) -> None:
         for key, attr, convert in mapping:
             prefix = f"{key}:"
             if line.startswith(prefix):
@@ -266,7 +248,6 @@ class OsuFile:
         data = line.split(",")
         if not data:
             return
-
         if data[0] == "Video":
             self.has_video = True
             self.video_file = data[2].strip('"')
@@ -288,20 +269,17 @@ class OsuFile:
             timing_change=None if len(parts) <= 6 else parts[6] == "1",
             kiai_time_active=None if len(parts) <= 7 else parts[7] == "1",
         )
-
         if tp.beat_length:
             if not self.timing_points:
                 tp.bpm = round(60000 / tp.beat_length)
                 self.bpm = tp.bpm
             else:
                 tp.velocity = abs(100 / tp.beat_length)
-
         self.timing_points.append(tp)
 
     def _parse_colors(self, line: str) -> None:
         sep = " : " if self.file_version < 128 else ": "
         name, rgb_str = line.split(sep, 1)
-        print(rgb_str.split(","))
         r, g, b = map(int, rgb_str.split(","))
         self.colors[name.strip()] = Color(r, g, b)
 
@@ -324,14 +302,15 @@ class OsuFile:
 
         if _type & ObjectType.CIRCLE:
             self.ncircles += 1
-            obj = Circle(pos=pos, start_time=int(data[2]), new_combo=new_combo, sound_enum=sound, hit_windows=hit_windows)
+            obj = Circle(pos=pos, start_time=int(data[2]), new_combo=new_combo,
+                         sound_enum=sound, hit_windows=hit_windows, stacked_position=None)
             if len(data) > 5:
                 obj.additions = self._parse_addition(data[5])
 
         elif _type & ObjectType.SPINNER:
             self.nspinners += 1
             obj = Spinner(pos=pos, start_time=int(data[2]), new_combo=new_combo,
-                          sound_enum=sound, end_time=int(data[5]), hit_windows=hit_windows)
+                          sound_enum=sound, end_time=int(data[5]), hit_windows=hit_windows, stacked_position=None)
             if len(data) > 6:
                 obj.additions = self._parse_addition(data[6])
 
@@ -378,12 +357,14 @@ class OsuFile:
                 end_time=int(data[2]) + duration,
                 curve_type=curve_type,
                 end_position=points_list[-1] if points_list else pos,
-                hit_windows = hit_windows
+                hit_windows=hit_windows,
+                stacked_position = None
             )
             if len(data) > 10:
                 obj.additions = self._parse_addition(data[10])
         else:
-            obj = HitObject(pos=pos, start_time=int(data[2]), new_combo=new_combo, sound_enum=sound, hit_windows=hit_windows)
+            obj = HitObject(pos=pos, start_time=int(data[2]), new_combo=new_combo,
+                            sound_enum=sound, hit_windows=hit_windows)
 
         self.total_hits += 1
         self.hit_objects.append(obj)
@@ -429,12 +410,10 @@ class OsuFile:
         idx = -1
         px_per_beat = None
         next_offset = float("-inf")
-
         for obj in self.hit_objects:
             if not isinstance(obj, Slider):
                 combo += 1
                 continue
-
             while next_offset is not None and obj.start_time >= next_offset:
                 idx += 1
                 if len(tps) > idx + 1:
@@ -448,12 +427,10 @@ class OsuFile:
                 px_per_beat = self.slider_multiplier * 100.0 * sv
                 if self.file_version < 8:
                     px_per_beat /= sv
-
             beats = (obj.pixel_length * obj.repeat_count) / px_per_beat
             ticks = math.ceil((beats - 0.1) / obj.repeat_count * self.slider_tick_rate)
             ticks = max(0, ticks - 1) * obj.repeat_count + obj.repeat_count + 1
             combo += ticks
-
         self.max_combo = combo
 
     def _calculate_map_duration(self) -> None:
@@ -463,3 +440,64 @@ class OsuFile:
         total_break = sum(end - start for start, end in self.break_times)
         self.play_time = math.floor(last.start_time / 1000)
         self.drain_time = math.floor((last.start_time - first.start_time - total_break) / 1000)
+
+    def _apply_stacking(self) -> None:
+        if not self.hit_objects:
+            return
+
+        dr = int(self.circle_radius // 10)
+        stack_indices = [0] * len(self.hit_objects)
+
+        for i, obj in enumerate(self.hit_objects):
+            if i > 0:
+                prev = self.hit_objects[i - 1]
+                if (obj.pos.x == prev.pos.x and obj.pos.y == prev.pos.y and
+                        obj.start_time - prev.start_time <= self.stack_window):
+                    stack_indices[i] = stack_indices[i - 1] + 1
+                else:
+                    stack_indices[i] = 0
+
+            offset = stack_indices[i] * dr
+
+            obj.stacked_position = Position(obj.pos.x + offset, obj.pos.y + offset)
+
+            # Shift all control pts for sliders
+            if isinstance(obj, Slider):
+                obj.stacked_points = [
+                    Position(p.x + offset, p.y + offset) for p in obj.points
+                ]
+                if obj.end_position:
+                    obj.stacked_end_position = Position(
+                        obj.end_position.x + offset,
+                        obj.end_position.y + offset,
+                    )
+
+    def get_last_uninherited_timing_point(self, offset: int) -> TimingPoint:
+        LUT = self.timing_points
+        try:
+            LUT = self.timing_points[self._timing_point_offsets.index(offset):]
+        except ValueError:
+            pass
+        for timing in reversed(LUT):
+            if timing.offset <= offset and timing.timing_change and timing.bpm is not None:
+                return timing
+        return self.timing_points[0]
+
+    def change_ar(self, ar: float):
+        self.ar = max(0.0, min(10.0, ar))
+        self.preempt = (
+            1200 + 120 * (5 - self.ar) if self.ar < 5
+            else 1200 - 150 * (self.ar - 5) if self.ar > 5
+            else 1200
+        )
+        self.stack_window = math.floor(self.preempt * self._stack_leniency)
+        # Re‑apply stacking with new window
+        self._apply_stacking()
+
+    def change_cs(self, cs: float):
+        self.cs = max(0.0, min(10.0, cs))
+        self.circle_radius = (54.4 - 4.48 * self.cs) * 1.00041 * 0.9
+        self._apply_stacking()
+
+    def get_hit_objects(self):
+        return self.hit_objects

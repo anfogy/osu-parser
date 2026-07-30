@@ -112,6 +112,7 @@ class TimingPoint:
 class HitObject:
     """Subclass representing standalone hitobject."""
     pos: Position
+    stacked_position: Optional[Position]
     start_time: int
     new_combo: bool
     sound_enum: int
@@ -142,6 +143,8 @@ class Slider(HitObject):
     end_time: int
     curve_type: CurveType
     end_position: Optional[Position]
+    stacked_points: Optional[List[Position]] = None
+    stacked_end_position: Optional[Position] = None
     additions: Optional[Additions] = None
 
 @dataclass
